@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>On Court Badminton — ระบบจัดการสต๊อก</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
   --navy-dark:#0e1730;
@@ -27,7 +28,8 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"No
 /* ---------- login ---------- */
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(155deg,var(--navy-dark) 0%,var(--navy) 55%,#5c2020 100%);padding:20px;}
 .login-box{background:#fff;border-radius:16px;padding:32px 28px;width:100%;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.25);text-align:center;}
-.login-logo{width:64px;height:64px;border-radius:50%;background:linear-gradient(160deg,var(--green-light),var(--green-dark));display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
+.login-logo{width:64px;height:64px;border-radius:50%;background:linear-gradient(160deg,var(--green-light),var(--green-dark));display:flex;align-items:center;justify-content:center;margin:0 auto 14px;overflow:hidden;}
+.login-logo img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
 .login-box h2{margin:0 0 4px;}
 .login-box .field{text-align:left;}
 .login-box input{width:100%;}
@@ -40,7 +42,8 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"No
 header{background:var(--navy);color:#fff;padding:0 24px;position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.15);border-bottom:3px solid var(--danger);}
 .header-top{display:flex;align-items:center;justify-content:space-between;padding:14px 0;gap:12px;flex-wrap:wrap;}
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;}
-.brand .logo{width:32px;height:32px;border-radius:50%;background:linear-gradient(160deg,var(--green-light),var(--green-dark));display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.brand .logo{width:32px;height:32px;border-radius:50%;background:linear-gradient(160deg,var(--green-light),var(--green-dark));display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;}
+.brand .logo img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
 .header-right{display:flex;align-items:center;gap:12px;font-size:13px;color:#aab4d4;flex-wrap:wrap;}
 .role-badge{background:rgba(255,255,255,.15);padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;}
 .header-right button{background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;cursor:pointer;}
@@ -155,7 +158,7 @@ label{font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bot
 
 <div class="login-wrap" id="loginScreen">
   <div class="login-box">
-    <div class="login-logo"><svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M12 3v8" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><path d="M6.2 6.2a8 8 0 1 0 11.6 0" stroke="#fff" stroke-width="2.6" stroke-linecap="round" fill="none"/></svg></div>
+    <div class="login-logo"><img src="/logo.png" alt="On Court Badminton" onerror="this.style.display='none'; this.parentElement.innerHTML='<svg width=\'30\' height=\'30\' viewBox=\'0 0 24 24\' fill=\'none\'><path d=\'M12 3v8\' stroke=\'#fff\' stroke-width=\'2.6\' stroke-linecap=\'round\'/><path d=\'M6.2 6.2a8 8 0 1 0 11.6 0\' stroke=\'#fff\' stroke-width=\'2.6\' stroke-linecap=\'round\' fill=\'none\'/></svg>';"></div>
     <h2>On Court Badminton</h2>
     <div class="muted" style="margin-bottom:18px;">เข้าสู่ระบบจัดการสต๊อก</div>
     <div id="loginLoading" style="display:none;padding:16px 0 6px;text-align:center;">
@@ -175,7 +178,7 @@ label{font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bot
 <div id="appRoot" style="display:none;">
   <header>
     <div class="header-top">
-      <div class="brand"><div class="logo"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 3v8" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/><path d="M6.2 6.2a8 8 0 1 0 11.6 0" stroke="#fff" stroke-width="2.8" stroke-linecap="round" fill="none"/></svg></div> On Court Badminton <span style="font-weight:400;font-size:13px;color:#9aa8c9;">— เชียงใหม่</span></div>
+      <div class="brand"><div class="logo"><img src="/logo.png" alt="On Court Badminton" onerror="this.style.display='none'; this.parentElement.innerHTML='<svg width=\'17\' height=\'17\' viewBox=\'0 0 24 24\' fill=\'none\'><path d=\'M12 3v8\' stroke=\'#fff\' stroke-width=\'2.8\' stroke-linecap=\'round\'/><path d=\'M6.2 6.2a8 8 0 1 0 11.6 0\' stroke=\'#fff\' stroke-width=\'2.8\' stroke-linecap=\'round\' fill=\'none\'/></svg>';"></div> On Court Badminton</div>
       <div class="header-right">
         <span id="meLabel"></span>
         <button onclick="doLogout()">ออกจากระบบ</button>
@@ -199,11 +202,34 @@ label{font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bot
 
 // หมวดหมู่ไม่ได้ล็อกตายตัวอีกต่อไป — อ่านจากข้อมูลสินค้าจริงในชีตเสมอ
 // (รองรับกรณีผู้ใช้ตั้งชื่อหมวดหมู่เองในสเปรดชีต เช่น Fee, Drink, Snacks, Shoes Rental ฯลฯ)
-const CATEGORY_LABELS = {'Drinks':'เครื่องดื่ม','Drink':'เครื่องดื่ม','Equipment':'อุปกรณ์กีฬา','Shoe Rental':'เช่ารองเท้า','Shoes Rental':'เช่ารองเท้า','Snacks':'ขนม','Fee':'ค่าบริการ'};
-function catLabel(c){ return CATEGORY_LABELS[c] || c; }
+// จับคู่แบบไม่สนตัวพิมพ์เล็ก-ใหญ่ กันกรณีพิมพ์ Snack/snacks/SNACKS ฯลฯ แล้ว label ไม่ขึ้น
+const CATEGORY_LABELS = {
+  'fee':'ค่าบริการ',
+  'drinks':'เครื่องดื่ม', 'drink':'เครื่องดื่ม',
+  'snacks':'ขนม', 'snack':'ขนม',
+  'equipment':'อุปกรณ์กีฬา', 'sports equipment':'อุปกรณ์กีฬา',
+  'shoe rental':'เช่าอุปกรณ์', 'shoes rental':'เช่าอุปกรณ์', 'equipment rental':'เช่าอุปกรณ์'
+};
+function catLabel(c){
+  if(!c) return c;
+  const key = String(c).toLowerCase().trim();
+  return CATEGORY_LABELS[key] || c;
+}
+// ลำดับการแสดงหมวดหมู่ที่ต้องการ: ทั้งหมด(บวกเองใน UI) > ค่าบริการ > เครื่องดื่ม > ขนม > อุปกรณ์กีฬา > เช่าอุปกรณ์
+// หมวดหมู่อื่นที่ผู้ใช้ตั้งเองนอกเหนือจากนี้ จะถูกเรียงต่อท้ายตามลำดับตัวอักษร
+const CATEGORY_ORDER = ['fee','drinks','snacks','equipment','shoe rental'];
 function getCategories(){
   const set = new Set(data.products.map(p=>p.category).filter(Boolean));
-  return Array.from(set).sort();
+  const arr = Array.from(set);
+  arr.sort((a,b)=>{
+    const ai = CATEGORY_ORDER.indexOf(String(a).toLowerCase().trim());
+    const bi = CATEGORY_ORDER.indexOf(String(b).toLowerCase().trim());
+    const aRank = ai===-1 ? 999 : ai;
+    const bRank = bi===-1 ? 999 : bi;
+    if(aRank!==bRank) return aRank-bRank;
+    return String(a).localeCompare(String(b));
+  });
+  return arr;
 }
 
 const TABS = [
@@ -715,7 +741,12 @@ function renderInventory(){
         ${['All',...getCategories()].map(c=>`<button class="chip ${state.invCategory===c?'active':''}" onclick="setInvCategory('${c.replace(/'/g,"\\'")}')">${c==='All'?'ทั้งหมด':escapeHtml(catLabel(c))}</button>`).join('')}
         <input type="text" class="search-input" placeholder="ค้นหาสินค้าหรือ SKU..." value="${escapeHtml(state.invSearch)}" oninput="setInvSearch(this.value)">
       </div>
-      <button class="btn btn-primary" onclick="openProductModal()">+ เพิ่มสินค้า</button>
+      <div class="row-actions">
+        <input type="file" id="productImportInput" accept=".xlsx,.xls" style="display:none;" onchange="handleProductImportFile(event)">
+        <button class="btn btn-outline" onclick="document.getElementById('productImportInput').click()">นำเข้า Excel</button>
+        <button class="btn btn-outline" onclick="exportProductsExcel()">ส่งออก Excel</button>
+        <button class="btn btn-primary" onclick="openProductModal()">+ เพิ่มสินค้า</button>
+      </div>
     </div>
 
     <div class="card" style="padding:0;">
@@ -858,6 +889,51 @@ async function applyAdjust(id){
   }catch(e){ showToast(e.message, true); }
 }
 
+// ---------- Import / Export สินค้า เป็น Excel (ใช้ SheetJS ฝั่ง browser ล้วนๆ) ----------
+function exportProductsExcel(){
+  const rows = data.products.map(p=>({
+    'ชื่อสินค้า': p.name, 'หมวดหมู่': p.category, 'SKU': p.sku,
+    'ราคาขาย': p.price, 'ต้นทุน': p.cost, 'คงเหลือ': p.stock,
+    'แจ้งเตือนเมื่อต่ำกว่า': p.lowStockThreshold, 'หน่วย': p.unit
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'สินค้า');
+  XLSX.writeFile(wb, `สินค้า-${new Date().toLocaleDateString('en-CA')}.xlsx`);
+}
+async function handleProductImportFile(ev){
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if(!file) return;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    if(!rows.length){ showToast('ไม่พบข้อมูลในไฟล์', true); return; }
+    if(!confirm(`นำเข้าสินค้า ${rows.length} รายการจากไฟล์นี้? (ถ้า SKU ตรงกับของเดิม จะอัปเดตทับ ถ้าไม่มีจะเพิ่มใหม่)`)) return;
+    let added=0, updated=0, failed=0;
+    for(const row of rows){
+      const name = String(row['ชื่อสินค้า']||'').trim();
+      const sku = String(row['SKU']||'').trim();
+      if(!name){ failed++; continue; }
+      const body = {
+        name, category: String(row['หมวดหมู่']||'').trim() || 'Drinks', sku,
+        price: parseFloat(row['ราคาขาย'])||0, cost: parseFloat(row['ต้นทุน'])||0,
+        stock: parseInt(row['คงเหลือ'])||0, lowStockThreshold: parseInt(row['แจ้งเตือนเมื่อต่ำกว่า'])||5,
+        unit: String(row['หน่วย']||'').trim() || 'ชิ้น'
+      };
+      const existing = sku ? data.products.find(p=>p.sku.toLowerCase().trim()===sku.toLowerCase()) : null;
+      try{
+        if(existing){ const saved = await apiCall('updateProduct', {id: existing.id, ...body}); const idx=data.products.findIndex(p=>p.id===existing.id); if(idx>=0) data.products[idx]=saved; updated++; }
+        else { const saved = await apiCall('addProduct', body); data.products.push(saved); added++; }
+      }catch(e){ failed++; }
+    }
+    state.tab='inventory'; render();
+    showToast(`นำเข้าเสร็จสิ้น — เพิ่มใหม่ ${added}, อัปเดต ${updated}${failed?`, ข้ามเพราะซ้ำ/ผิดพลาด ${failed}`:''}`);
+  }catch(e){ showToast('อ่านไฟล์ไม่สำเร็จ: ' + e.message, true); }
+}
+
 // =====================================================================
 // นับสต๊อก (Stock Count)
 // =====================================================================
@@ -969,7 +1045,12 @@ function renderPOs(){
 
     <div class="toolbar">
       <div></div>
-      <button class="btn btn-primary" onclick="openPODraftModal()">+ สร้างใบสั่งซื้อ</button>
+      <div class="row-actions">
+        <input type="file" id="poImportInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePOImportFile(event)">
+        <button class="btn btn-outline" onclick="document.getElementById('poImportInput').click()">นำเข้า Excel</button>
+        <button class="btn btn-outline" onclick="exportPOsExcel()">ส่งออก Excel</button>
+        <button class="btn btn-primary" onclick="openPODraftModal()">+ สร้างใบสั่งซื้อ</button>
+      </div>
     </div>
 
     <div class="card" style="padding:0;">
@@ -984,11 +1065,12 @@ function renderPOs(){
               <td>${fmtDate(po.date)}</td>
               <td>${po.items.length} รายการ</td>
               ${isOwner?`<td>${money(po.total)}</td>`:''}
-              <td>${po.status==='Received' ? '<span class="badge badge-received">รับของแล้ว</span>' : '<span class="badge badge-pending">รอรับของ</span>'}</td>
+              <td>${po.status==='Received' ? '<span class="badge badge-received">รับของแล้ว</span>' : (po.status==='Cancelled' ? '<span class="badge badge-out">ยกเลิกแล้ว</span>' : '<span class="badge badge-pending">รอรับของ</span>')}</td>
               <td>
                 <div class="row-actions">
                   <button class="btn btn-outline btn-sm" onclick="viewPO('${po.id}')">ดูรายละเอียด</button>
                   ${po.status==='Pending' ? `<button class="btn btn-primary btn-sm" onclick="openReceiveModal('${po.id}')">รับของ</button>` : ''}
+                  ${po.status==='Pending' ? `<button class="btn btn-danger btn-sm" onclick="cancelPO('${po.id}')">ยกเลิก</button>` : ''}
                 </div>
               </td>
             </tr>`).join('')}
@@ -1016,9 +1098,19 @@ function viewPO(id){
     ${isOwner?`<div class="cart-total-row grand"><span>ยอดรวม</span><span>${money(po.total)}</span></div>`:''}
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal()">ปิด</button>
+      ${po.status==='Pending' ? `<button class="btn btn-danger" onclick="closeModal(); cancelPO('${po.id}');">ยกเลิกใบสั่งซื้อ</button>` : ''}
       ${po.status==='Pending' ? `<button class="btn btn-primary" onclick="closeModal(); openReceiveModal('${po.id}');">รับของเข้าสต๊อก</button>` : ''}
     </div>
   `);
+}
+async function cancelPO(id){
+  if(!confirm('ยกเลิกใบสั่งซื้อนี้? จะไม่สามารถรับของเข้าสต๊อกจากใบนี้ได้อีก')) return;
+  try{
+    const saved = await apiCall('cancelPO', {id});
+    const idx = data.purchaseOrders.findIndex(p=>p.id===id); if(idx>=0) data.purchaseOrders[idx]=saved;
+    state.tab='po'; render();
+    showToast('ยกเลิกใบสั่งซื้อเรียบร้อย');
+  }catch(e){ showToast(e.message, true); }
 }
 function openReceiveModal(id){
   const po = data.purchaseOrders.find(x=>x.id===id);
@@ -1112,6 +1204,63 @@ async function savePODraft(){
     state.poDraft=null; closeModal(); state.tab='po'; render();
     showToast('สร้างใบสั่งซื้อเรียบร้อย');
   }catch(e){ showToast(e.message, true); }
+}
+
+// ---------- Import / Export ใบสั่งซื้อ เป็น Excel ----------
+// ส่งออก: 1 แถวต่อ 1 รายการสินค้าในใบสั่งซื้อ (เพื่อดูง่ายเป็นตาราง)
+// นำเข้า: ใช้สร้างใบสั่งซื้อใหม่เท่านั้น (ไม่แก้ไขใบเดิม) — แถวที่มี "กลุ่มใบสั่งซื้อ" เดียวกันจะถูกรวมเป็นใบเดียวกัน
+function exportPOsExcel(){
+  const rows = [];
+  data.purchaseOrders.forEach(po=>{
+    po.items.forEach(it=>{
+      rows.push({
+        'เลขที่ใบสั่งซื้อ': po.id, 'ซัพพลายเออร์': po.supplier, 'วันที่สั่ง': fmtDate(po.date),
+        'สถานะ': po.status==='Received'?'รับของแล้ว':(po.status==='Cancelled'?'ยกเลิกแล้ว':'รอรับของ'),
+        'ชื่อสินค้า': it.name, 'จำนวนสั่ง': it.qty, 'ต้นทุนต่อหน่วย': it.cost
+      });
+    });
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'ใบสั่งซื้อ');
+  XLSX.writeFile(wb, `ใบสั่งซื้อ-${new Date().toLocaleDateString('en-CA')}.xlsx`);
+}
+async function handlePOImportFile(ev){
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if(!file) return;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    if(!rows.length){ showToast('ไม่พบข้อมูลในไฟล์', true); return; }
+    if(!confirm(`นำเข้าไฟล์นี้จะสร้างใบสั่งซื้อใหม่ตามข้อมูลในไฟล์ (ไม่แก้ไขใบเดิม) ทั้งหมด ${rows.length} แถว ดำเนินการต่อ?`)) return;
+    // จัดกลุ่มตามคอลัมน์ "กลุ่มใบสั่งซื้อ" — ถ้าเว้นว่างให้แยกเป็นคนละใบ
+    const groups = [];
+    const groupMap = {};
+    rows.forEach((row,i)=>{
+      const supplier = String(row['ซัพพลายเออร์']||'').trim();
+      const productName = String(row['ชื่อสินค้า']||'').trim();
+      const qty = parseInt(row['จำนวนสั่ง'])||0;
+      const cost = parseFloat(row['ต้นทุนต่อหน่วย'])||0;
+      const groupKey = String(row['กลุ่มใบสั่งซื้อ']||'').trim();
+      if(!productName || !supplier) return;
+      const product = data.products.find(p=>p.name.toLowerCase().trim()===productName.toLowerCase());
+      if(!product) return;
+      const key = groupKey || ('__row'+i);
+      if(!groupMap[key]){ groupMap[key] = {supplier, items:[]}; groups.push(groupMap[key]); }
+      groupMap[key].items.push({productId: product.id, qty, cost});
+    });
+    let created=0, failed=0;
+    for(const g of groups){
+      if(!g.items.length){ failed++; continue; }
+      try{ const saved = await apiCall('createPO', {supplier: g.supplier, items: g.items}); data.purchaseOrders.push(saved); created++; }
+      catch(e){ failed++; }
+    }
+    state.tab='po'; render();
+    showToast(`นำเข้าเสร็จสิ้น — สร้างใบสั่งซื้อใหม่ ${created} ใบ${failed?`, ข้าม ${failed} กลุ่ม (หาสินค้าไม่เจอ/ผิดพลาด)`:''}`);
+  }catch(e){ showToast('อ่านไฟล์ไม่สำเร็จ: ' + e.message, true); }
 }
 
 // =====================================================================
