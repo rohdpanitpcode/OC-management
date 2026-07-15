@@ -32,7 +32,9 @@ function mapProduct(row) {
   return {
     id: row.id, name: row.name, category: row.category, sku: row.sku,
     price: Number(row.price), cost: Number(row.cost), stock: Number(row.stock),
-    lowStockThreshold: Number(row.low_stock_threshold), unit: row.unit
+    lowStockThreshold: Number(row.low_stock_threshold), unit: row.unit,
+    status: row.status || 'active', sortOrder: Number(row.sort_order) || 0,
+    updatedAt: row.updated_at, updatedBy: row.updated_by || ''
   };
 }
 function mapMember(row) {
@@ -49,7 +51,14 @@ function mapPO(row) {
   return {
     id: row.id, supplier: row.supplier, date: row.date, status: row.status,
     receivedDate: row.received_date, items: row.items, total: Number(row.total),
-    createdBy: row.created_by, receivedBy: row.received_by
+    createdBy: row.created_by, receivedBy: row.received_by, receiptPhotoUrl: row.receipt_photo_url || ''
+  };
+}
+function mapStockCount(row) {
+  return {
+    id: row.id, date: row.date, countedBy: row.counted_by, items: row.items,
+    totalDiffItems: Number(row.total_diff_items) || 0, status: row.status || 'approved',
+    approvedBy: row.approved_by, approvedAt: row.approved_at
   };
 }
 function mapEmployee(row) {
@@ -114,7 +123,7 @@ async function updateSettings(payload) {
 
 async function bootstrap(emp) {
   const [products, members, sales, pos, stockLog, settings] = await Promise.all([
-    query('SELECT * FROM products ORDER BY name'),
+    query('SELECT * FROM products ORDER BY sort_order ASC, name ASC'),
     query('SELECT * FROM members ORDER BY joined DESC'),
     query('SELECT * FROM sales WHERE deleted=false ORDER BY date DESC'),
     query('SELECT * FROM purchase_orders ORDER BY date DESC'),
@@ -132,6 +141,8 @@ async function bootstrap(emp) {
   if (emp.role === 'owner') {
     const empRes = await query('SELECT * FROM employees ORDER BY username');
     result.employees = empRes.rows.map(mapEmployee);
+    const pendingCounts = await query(`SELECT * FROM stock_counts WHERE status='pending' ORDER BY date DESC`);
+    result.pendingStockCounts = pendingCounts.rows.map(mapStockCount);
   }
   result.me = emp;
   return result;
@@ -161,18 +172,20 @@ async function checkProductDuplicate(payload, excludeId) {
     if (r.rows.length) throw apiError('มี SKU นี้อยู่แล้วในระบบ: ' + sku);
   }
 }
-async function addProduct(payload) {
+async function addProduct(payload, emp) {
   await checkProductDuplicate(payload, null);
   const id = uid('p');
   const r = await query(
-    `INSERT INTO products (id,name,category,sku,price,cost,stock,low_stock_threshold,unit)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    `INSERT INTO products (id,name,category,sku,price,cost,stock,low_stock_threshold,unit,status,sort_order,updated_at,updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),$12) RETURNING *`,
     [id, payload.name || '', payload.category || 'Drinks', payload.sku || '', payload.price || 0,
-     payload.cost || 0, payload.stock || 0, payload.lowStockThreshold || 5, payload.unit || 'pc']
+     payload.cost || 0, payload.stock || 0, payload.lowStockThreshold || 5, payload.unit || 'pc',
+     payload.status === 'discontinued' ? 'discontinued' : 'active', parseInt(payload.sortOrder, 10) || 0,
+     emp ? emp.name : '']
   );
   return mapProduct(r.rows[0]);
 }
-async function updateProduct(payload) {
+async function updateProduct(payload, emp) {
   if (payload.name !== undefined || payload.sku !== undefined) {
     await checkProductDuplicate(payload, payload.id);
   }
@@ -181,11 +194,15 @@ async function updateProduct(payload) {
   Object.keys(colMap).forEach(f => {
     if (payload[f] !== undefined) { sets.push(`${colMap[f]}=$${i}`); vals.push(payload[f]); i++; }
   });
+  if (payload.status !== undefined) { sets.push(`status=$${i}`); vals.push(payload.status === 'discontinued' ? 'discontinued' : 'active'); i++; }
+  if (payload.sortOrder !== undefined) { sets.push(`sort_order=$${i}`); vals.push(parseInt(payload.sortOrder, 10) || 0); i++; }
   if (!sets.length) {
     const r = await query('SELECT * FROM products WHERE id=$1', [payload.id]);
     if (!r.rows[0]) throw apiError('ไม่พบสินค้า');
     return mapProduct(r.rows[0]);
   }
+  sets.push(`updated_at=now()`);
+  sets.push(`updated_by=$${i}`); vals.push(emp ? emp.name : ''); i++;
   vals.push(payload.id);
   const r = await query(`UPDATE products SET ${sets.join(', ')} WHERE id=$${i} RETURNING *`, vals);
   if (!r.rows[0]) throw apiError('ไม่พบสินค้า');
@@ -202,7 +219,7 @@ async function adjustStock(payload, emp) {
     if (!p) throw apiError('ไม่พบสินค้า');
     const delta = parseInt(payload.delta, 10) || 0;
     if (Number(p.stock) + delta < 0) throw apiError('สต๊อกติดลบไม่ได้');
-    const upd = await client.query('UPDATE products SET stock = stock + $1 WHERE id=$2 RETURNING *', [delta, payload.id]);
+    const upd = await client.query('UPDATE products SET stock = stock + $1, updated_at=now(), updated_by=$2 WHERE id=$3 RETURNING *', [delta, emp.name, payload.id]);
     await client.query('INSERT INTO stock_log (product_name, delta, reason, by_name) VALUES ($1,$2,$3,$4)',
       [p.name, delta, payload.reason || 'Correction', emp.name]);
     return mapProduct(upd.rows[0]);
@@ -357,6 +374,23 @@ async function receivePO(payload, emp) {
     return mapPO(upd.rows[0]);
   });
 }
+async function attachPOProof(payload) {
+  if (!supabase) throw apiError('ยังไม่ได้ตั้งค่า Supabase Storage (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
+  const { poId, imageBase64, mimeType } = payload;
+  if (!poId) throw apiError('ไม่พบเลขที่ใบสั่งซื้อ');
+  if (!imageBase64) throw apiError('ไม่มีข้อมูลรูปภาพ');
+  const buffer = Buffer.from(imageBase64, 'base64');
+  const fileName = `po-${poId}-${Date.now()}.jpg`;
+  const { error: upErr } = await supabase.storage.from('payment-slips').upload(fileName, buffer, {
+    contentType: mimeType || 'image/jpeg', upsert: true
+  });
+  if (upErr) throw apiError('อัปโหลดรูปไม่สำเร็จ: ' + upErr.message);
+  const { data: urlData } = supabase.storage.from('payment-slips').getPublicUrl(fileName);
+  const url = urlData.publicUrl;
+  const res = await query('UPDATE purchase_orders SET receipt_photo_url=$1 WHERE id=$2 RETURNING id', [url, poId]);
+  if (!res.rows[0]) throw apiError('ไม่พบใบสั่งซื้อนี้ในระบบ');
+  return { poId, receiptPhotoUrl: url };
+}
 async function cancelPO(payload) {
   const r = await query('SELECT * FROM purchase_orders WHERE id=$1', [payload.id]);
   const po = r.rows[0];
@@ -370,32 +404,64 @@ async function cancelPO(payload) {
 // ---------------------------------------------------------------------
 // Stock count
 // ---------------------------------------------------------------------
+// หมายเหตุ: การนับสต๊อกไม่ปรับสต๊อกจริงทันทีอีกต่อไป — รายการที่นับได้ตรงกับระบบ (diff=0) ไม่มีอะไรต้องทำ
+// ส่วนรายการที่นับได้ไม่ตรง (diff!=0) จะถูกพักไว้เป็น "รอเจ้าของร้านอนุมัติ" ก่อน ถึงจะไปอัปเดตสต๊อกจริง
 async function submitStockCount(payload, emp) {
   const counts = payload.counts || [];
   if (!counts.length) throw apiError('ยังไม่ได้กรอกจำนวนนับ');
+  const results = [];
+  for (const c of counts) {
+    const r = await query('SELECT * FROM products WHERE id=$1', [c.productId]);
+    const p = r.rows[0];
+    if (!p) continue;
+    const counted = Number(c.countedQty);
+    if (isNaN(counted) || counted < 0) continue;
+    const before = Number(p.stock);
+    const diff = counted - before;
+    results.push({ productId: p.id, name: p.name, unit: p.unit, before, counted, diff });
+  }
+  const diffCount = results.filter(r => r.diff !== 0).length;
+  const id = uid('sc');
+  const status = diffCount > 0 ? 'pending' : 'approved';
+  await query('INSERT INTO stock_counts (id, counted_by, items, total_diff_items, status) VALUES ($1,$2,$3,$4,$5)',
+    [id, emp.name, JSON.stringify(results), diffCount, status]);
+  return { id, results, totalDiffItems: diffCount, status };
+}
+// เจ้าของร้านอนุมัติผลต่างจากการนับสต๊อก — ตอนนี้ค่อยไปอัปเดตสต๊อกจริงและบันทึกประวัติ
+async function approveStockCount(payload, emp) {
   return withTransaction(async (client) => {
-    const results = [];
-    for (const c of counts) {
-      const r = await client.query('SELECT * FROM products WHERE id=$1 FOR UPDATE', [c.productId]);
-      const p = r.rows[0];
+    const r = await client.query('SELECT * FROM stock_counts WHERE id=$1 FOR UPDATE', [payload.id]);
+    const sc = r.rows[0];
+    if (!sc) throw apiError('ไม่พบรายการนับสต๊อกนี้');
+    if (sc.status === 'approved') throw apiError('รายการนี้อนุมัติไปแล้ว');
+    if (sc.status === 'rejected') throw apiError('รายการนี้ถูกปฏิเสธไปแล้ว');
+    const items = sc.items || [];
+    for (const it of items) {
+      if (!it.diff) continue;
+      const pr = await client.query('SELECT * FROM products WHERE id=$1 FOR UPDATE', [it.productId]);
+      const p = pr.rows[0];
       if (!p) continue;
-      const counted = Number(c.countedQty);
-      if (isNaN(counted) || counted < 0) continue;
-      const before = Number(p.stock);
-      const diff = counted - before;
-      results.push({ productId: p.id, name: p.name, unit: p.unit, before, counted, diff });
-      if (diff !== 0) {
-        await client.query('UPDATE products SET stock=$1 WHERE id=$2', [counted, p.id]);
-        await client.query('INSERT INTO stock_log (product_name, delta, reason, by_name) VALUES ($1,$2,$3,$4)',
-          [p.name, diff, 'นับสต๊อก (Stock Count)', emp.name]);
-      }
+      await client.query('UPDATE products SET stock=$1, updated_at=now(), updated_by=$2 WHERE id=$3', [it.counted, emp.name, it.productId]);
+      await client.query('INSERT INTO stock_log (product_name, delta, reason, by_name) VALUES ($1,$2,$3,$4)',
+        [it.name, it.diff, 'นับสต๊อก (อนุมัติแล้ว)', emp.name]);
     }
-    const diffCount = results.filter(r => r.diff !== 0).length;
-    const id = uid('sc');
-    await client.query('INSERT INTO stock_counts (id, counted_by, items, total_diff_items) VALUES ($1,$2,$3,$4)',
-      [id, emp.name, JSON.stringify(results), diffCount]);
-    return { results, totalDiffItems: diffCount };
+    const upd = await client.query(
+      `UPDATE stock_counts SET status='approved', approved_by=$1, approved_at=now() WHERE id=$2 RETURNING *`,
+      [emp.name, payload.id]
+    );
+    return mapStockCount(upd.rows[0]);
   });
+}
+async function rejectStockCount(payload, emp) {
+  const r = await query('SELECT * FROM stock_counts WHERE id=$1', [payload.id]);
+  const sc = r.rows[0];
+  if (!sc) throw apiError('ไม่พบรายการนับสต๊อกนี้');
+  if (sc.status !== 'pending') throw apiError('รายการนี้ไม่ได้อยู่ในสถานะรออนุมัติ');
+  const upd = await query(
+    `UPDATE stock_counts SET status='rejected', approved_by=$1, approved_at=now() WHERE id=$2 RETURNING *`,
+    [emp.name, payload.id]
+  );
+  return mapStockCount(upd.rows[0]);
 }
 
 // ---------------------------------------------------------------------
@@ -437,7 +503,7 @@ async function deleteEmployee(payload, emp) {
 // ---------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------
-const OWNER_ONLY_ACTIONS = ['addEmployee', 'updateEmployee', 'deleteEmployee', 'deleteSale', 'updateSettings'];
+const OWNER_ONLY_ACTIONS = ['addEmployee', 'updateEmployee', 'deleteEmployee', 'deleteSale', 'updateSettings', 'approveStockCount', 'rejectStockCount'];
 
 async function route(action, token, payload) {
   if (action === 'login') {
@@ -454,8 +520,8 @@ async function route(action, token, payload) {
   try {
     switch (action) {
       case 'bootstrap': return { data: await bootstrap(emp) };
-      case 'addProduct': return { data: await addProduct(payload) };
-      case 'updateProduct': return { data: await updateProduct(payload) };
+      case 'addProduct': return { data: await addProduct(payload, emp) };
+      case 'updateProduct': return { data: await updateProduct(payload, emp) };
       case 'deleteProduct': return { data: await deleteProduct(payload) };
       case 'adjustStock': return { data: await adjustStock(payload, emp) };
       case 'addMember': return { data: await addMember(payload) };
@@ -468,7 +534,10 @@ async function route(action, token, payload) {
       case 'createPO': return { data: await createPO(payload, emp) };
       case 'receivePO': return { data: await receivePO(payload, emp) };
       case 'cancelPO': return { data: await cancelPO(payload) };
+      case 'attachPOProof': return { data: await attachPOProof(payload) };
       case 'submitStockCount': return { data: await submitStockCount(payload, emp) };
+      case 'approveStockCount': return { data: await approveStockCount(payload, emp) };
+      case 'rejectStockCount': return { data: await rejectStockCount(payload, emp) };
       case 'addEmployee': return { data: await addEmployee(payload) };
       case 'updateEmployee': return { data: await updateEmployee(payload) };
       case 'deleteEmployee': return { data: await deleteEmployee(payload, emp) };
