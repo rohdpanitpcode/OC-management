@@ -233,7 +233,7 @@ function getCategories(){
 }
 
 const TABS = [
-  {id:'dashboard', label:'แดชบอร์ด'},
+  {id:'dashboard', label:'สรุปภาพรวม'},
   {id:'sell', label:'ขายสินค้า'},
   {id:'inventory', label:'คลังสินค้า'},
   {id:'stockcount', label:'นับสต๊อก'},
@@ -243,7 +243,7 @@ const TABS = [
 
 let token = localStorage.getItem('oncourt_token') || null;
 let me = null;
-let data = { products:[], members:[], sales:[], purchaseOrders:[], stockLog:[], employees:[], settings:{} };
+let data = { products:[], members:[], sales:[], purchaseOrders:[], stockLog:[], employees:[], settings:{}, pendingStockCounts:[] };
 
 let state = {
   tab: 'dashboard',
@@ -384,6 +384,7 @@ async function bootstrap(){
   data.stockLog = res.stockLog || [];
   data.employees = res.employees || [];
   data.settings = res.settings || {};
+  data.pendingStockCounts = res.pendingStockCounts || [];
   me = res.me;
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appRoot').style.display = 'block';
@@ -443,6 +444,9 @@ function renderDashboard(){
   const lowStock = data.products.filter(p=>p.stock<=p.lowStockThreshold && p.stock>0);
   const outStock = data.products.filter(p=>p.stock<=0);
   const avgTicket = data.sales.length ? (data.sales.reduce((s,x)=>s+x.total,0)/data.sales.length) : 0;
+  const isOwner = me && me.role==='owner';
+  const todayProfit = isOwner ? todaySales.reduce((s,x)=>s+saleBreakdown(x).profit,0) : 0;
+  const monthProfit = isOwner ? monthSales.reduce((s,x)=>s+saleBreakdown(x).profit,0) : 0;
 
   const days = [];
   for(let i=13;i>=0;i--){
@@ -465,12 +469,14 @@ function renderDashboard(){
   const recentSales = [...data.sales].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,8);
 
   return `
-    <div class="page-title">แดชบอร์ด</div>
+    <div class="page-title">สรุปภาพรวม</div>
     <div class="page-sub">ภาพรวมยอดขาย สต๊อก และสมาชิก</div>
 
     <div class="stat-grid">
       <div class="stat-card"><div class="label">ยอดขายวันนี้</div><div class="value">${money(todayTotal)}</div><div class="sub">${todaySales.length} รายการ</div></div>
       <div class="stat-card"><div class="label">ยอดขายเดือนนี้</div><div class="value">${money(monthTotal)}</div><div class="sub">${monthSales.length} รายการ</div></div>
+      ${isOwner ? `<div class="stat-card"><div class="label">กำไรวันนี้</div><div class="value">${money(todayProfit)}</div><div class="sub">ไม่รวมค่าบริการ</div></div>` : ''}
+      ${isOwner ? `<div class="stat-card"><div class="label">กำไรเดือนนี้</div><div class="value">${money(monthProfit)}</div><div class="sub">ไม่รวมค่าบริการ</div></div>` : ''}
       <div class="stat-card ${lowStock.length||outStock.length?'alert':''}"><div class="label">สต๊อกต่ำ / หมด</div><div class="value">${lowStock.length + outStock.length}</div><div class="sub">หมด ${outStock.length} · ต่ำ ${lowStock.length}</div></div>
       <div class="stat-card"><div class="label">สมาชิก</div><div class="value">${data.members.length}</div><div class="sub">เฉลี่ยต่อบิล ${money(avgTicket)}</div></div>
     </div>
@@ -540,11 +546,12 @@ function renderDashboard(){
 // =====================================================================
 function renderSell(){
   const filtered = data.products.filter(p=>{
+    if(p.status==='discontinued') return false; // สินค้าเลิกขาย ไม่แสดงในหน้าขาย
     const catOk = state.sellCategory==='All' || p.category===state.sellCategory;
     const q = state.sellSearch.toLowerCase();
     const searchOk = p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
     return catOk && searchOk;
-  });
+  }).sort((a,b)=> (a.sortOrder||0)-(b.sortOrder||0) || a.name.localeCompare(b.name));
 
   const cartLines = state.cart.map(line => {
     const p = getProduct(line.productId);
@@ -731,7 +738,7 @@ function renderInventory(){
     const searchOk = p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
     return catOk && searchOk;
   });
-  const colCount = isOwner ? 8 : 7;
+  const colCount = isOwner ? 10 : 9;
   return `
     <div class="page-title">คลังสินค้า</div>
     <div class="page-sub">ตรวจสอบสต๊อกและราคาขาย${isOwner ? ' และต้นทุน' : ''}</div>
@@ -752,7 +759,7 @@ function renderInventory(){
     <div class="card" style="padding:0;">
       <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>สินค้า</th><th>หมวดหมู่</th><th>SKU</th><th>ราคาขาย</th>${isOwner?'<th>ต้นทุน</th>':''}<th>คงเหลือ</th><th>สถานะ</th><th></th></tr></thead>
+        <thead><tr><th>สินค้า</th><th>หมวดหมู่</th><th>SKU</th><th>ราคาขาย</th>${isOwner?'<th>ต้นทุน</th>':''}<th>คงเหลือ</th><th>สต๊อก</th><th>สถานะขาย</th><th>อัปเดตล่าสุด</th><th></th></tr></thead>
         <tbody>
           ${filtered.map(p=>`
             <tr>
@@ -763,10 +770,13 @@ function renderInventory(){
               ${isOwner?`<td>${money(p.cost)}</td>`:''}
               <td>${p.stock} ${escapeHtml(p.unit)}</td>
               <td>${p.stock<=0 ? '<span class="badge badge-out">หมด</span>' : (p.stock<=p.lowStockThreshold ? '<span class="badge badge-low">ต่ำ</span>' : '<span class="badge badge-ok">ปกติ</span>')}</td>
+              <td>${p.status==='discontinued' ? '<span class="badge badge-out">เลิกขาย</span>' : '<span class="badge badge-ok">ขาย</span>'}</td>
+              <td class="muted" style="font-size:12px;">${p.updatedAt ? fmtDateTime(p.updatedAt) : '—'}${p.updatedBy?' · '+escapeHtml(p.updatedBy):''}</td>
               <td>
                 <div class="row-actions">
                   ${isOwner?`<button class="btn btn-outline btn-sm" onclick="openAdjustModal('${p.id}')">ปรับสต๊อก</button>`:''}
                   <button class="btn btn-outline btn-sm" onclick="openProductModal('${p.id}')">แก้ไข</button>
+                  <button class="btn btn-outline btn-sm" onclick="toggleProductStatus('${p.id}')">${p.status==='discontinued'?'กลับมาขาย':'เลิกขาย'}</button>
                   <button class="btn btn-danger btn-sm" onclick="deleteProduct('${p.id}')">ลบ</button>
                 </div>
               </td>
@@ -795,6 +805,16 @@ function renderInventory(){
 }
 function setInvCategory(c){ state.invCategory=c; render(); }
 function setInvSearch(v){ state.invSearch=v; render(); }
+async function toggleProductStatus(id){
+  const p = getProduct(id);
+  const newStatus = p.status==='discontinued' ? 'active' : 'discontinued';
+  try{
+    const saved = await apiCall('updateProduct', {id, status: newStatus});
+    const idx = data.products.findIndex(x=>x.id===id); if(idx>=0) data.products[idx]=saved;
+    render();
+    showToast(newStatus==='discontinued' ? 'ปรับเป็นเลิกขายแล้ว (จะไม่แสดงในหน้าขาย)' : 'เปิดขายสินค้านี้อีกครั้งแล้ว');
+  }catch(e){ showToast(e.message, true); }
+}
 
 function openProductModal(id){
   const p = id ? getProduct(id) : null;
@@ -818,7 +838,16 @@ function openProductModal(id){
       <div class="field"><label>แจ้งเตือนเมื่อต่ำกว่า</label><input type="number" id="f_low" value="${p?p.lowStockThreshold:5}" min="0"></div>
     </div>
     ${isOwner ? '' : '<div class="muted" style="font-size:12px;margin-bottom:10px;">แก้ไขจำนวนสต๊อกได้ที่เมนู "นับสต๊อก" แทน</div>'}
-    <div class="field"><label>หน่วยนับ (เช่น ขวด, ชิ้น, คู่)</label><input type="text" id="f_unit" value="${p?escapeHtml(p.unit):'ชิ้น'}"></div>
+    <div class="two-col">
+      <div class="field"><label>หน่วยนับ (เช่น ขวด, ชิ้น, คู่)</label><input type="text" id="f_unit" value="${p?escapeHtml(p.unit):'ชิ้น'}"></div>
+      <div class="field"><label>ลำดับการแสดงในหน้าขาย (เลขน้อยขึ้นก่อน)</label><input type="number" id="f_sortorder" value="${p?p.sortOrder:0}"></div>
+    </div>
+    <div class="field"><label>สถานะ</label>
+      <select id="f_status">
+        <option value="active" ${!p||p.status==='active'?'selected':''}>ขาย</option>
+        <option value="discontinued" ${p&&p.status==='discontinued'?'selected':''}>เลิกขาย (ไม่แสดงในหน้าขาย)</option>
+      </select>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
       <button class="btn btn-primary" onclick="saveProduct('${p?p.id:''}')">บันทึก</button>
@@ -834,9 +863,11 @@ async function saveProduct(id){
   const stockEl = document.getElementById('f_stock');
   const lowStockThreshold = parseInt(document.getElementById('f_low').value) || 0;
   const unit = document.getElementById('f_unit').value.trim() || 'ชิ้น';
+  const sortOrder = parseInt(document.getElementById('f_sortorder').value) || 0;
+  const status = document.getElementById('f_status').value;
   if(!name){ showToast('กรุณากรอกชื่อสินค้า', true); return; }
   try{
-    const body = {name, category, sku, price, lowStockThreshold, unit};
+    const body = {name, category, sku, price, lowStockThreshold, unit, sortOrder, status};
     // ซ่อนต้นทุนกับการแก้จำนวนสต๊อกตรงๆ จากพนักงาน — ถ้าไม่เห็นฟิลด์นี้ (ไม่ใช่เจ้าของร้าน) ไม่ส่งค่าไปทับของเดิม
     if(costEl) body.cost = parseFloat(costEl.value) || 0;
     if(stockEl && !stockEl.disabled) body.stock = parseInt(stockEl.value) || 0;
@@ -947,10 +978,17 @@ function renderStockCount(){
     const searchOk = p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
     return catOk && searchOk;
   });
-  const enteredCount = Object.values(state.stockCountInputs).filter(v=>v!=='' && v!=null).length;
+  const totalCount = data.products.length;
+  const enteredCount = data.products.filter(p=>{
+    const v = state.stockCountInputs[p.id];
+    return v!=='' && v!=null && v!==undefined;
+  }).length;
+  const isOwner = me && me.role==='owner';
   return `
     <div class="page-title">นับสต๊อก</div>
-    <div class="page-sub">กรอกจำนวนที่นับได้จริงต่อสินค้า ระบบจะคำนวณผลต่างให้หลังกดยืนยัน</div>
+    <div class="page-sub">กรอกจำนวนที่นับได้จริงต่อสินค้า ระบบจะคำนวณผลต่างให้หลังกดยืนยัน — ต้องกรอกให้ครบทุกรายการก่อนยืนยันได้</div>
+
+    ${isOwner && data.pendingStockCounts && data.pendingStockCounts.length ? renderPendingStockCounts() : ''}
 
     <div class="toolbar">
       <div class="toolbar-left">
@@ -978,10 +1016,58 @@ function renderStockCount(){
     </div>
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
-      <div class="muted" style="font-size:13px;">นับแล้ว ${enteredCount} รายการ</div>
-      <button class="btn btn-primary" ${enteredCount===0?'disabled':''} onclick="submitStockCount()">ยืนยันการนับ</button>
+      <div class="muted" style="font-size:13px;">นับแล้ว ${enteredCount} / ${totalCount} รายการ${enteredCount<totalCount?' — ต้องกรอกให้ครบทุกรายการ (สลับหมวดหมู่/ค้นหาเพื่อกรอกรายการที่เหลือ)':''}</div>
+      <button class="btn btn-primary" ${enteredCount<totalCount?'disabled':''} onclick="submitStockCount()">ยืนยันการนับ</button>
     </div>
   `;
+}
+function renderPendingStockCounts(){
+  return `
+    <div class="card" style="margin-bottom:16px;border-color:var(--warn);">
+      <div class="section-title">รอเจ้าของร้านอนุมัติผลต่างจากการนับสต๊อก (${data.pendingStockCounts.length} รายการ)</div>
+      ${data.pendingStockCounts.map(sc=>{
+        const diffItems = (sc.items||[]).filter(it=>it.diff);
+        return `
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+            <div><strong>นับโดย ${escapeHtml(sc.countedBy||'—')}</strong> <span class="muted" style="font-size:12px;">${fmtDateTime(sc.date)} · ผลต่าง ${diffItems.length} รายการ</span></div>
+            <div class="row-actions">
+              <button class="btn btn-danger btn-sm" onclick="rejectStockCountSubmission('${sc.id}')">ปฏิเสธ</button>
+              <button class="btn btn-primary btn-sm" onclick="approveStockCountSubmission('${sc.id}')">อนุมัติ</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>สินค้า</th><th>นับได้</th><th>ระบบ (ก่อนนับ)</th><th>ผลต่าง</th></tr></thead>
+            <tbody>
+              ${diffItems.map(it=>`<tr><td>${escapeHtml(it.name)}</td><td>${it.counted} ${escapeHtml(it.unit)}</td><td class="muted">${it.before} ${escapeHtml(it.unit)}</td><td><span class="badge ${it.diff>0?'badge-received':'badge-out'}">${it.diff>0?'+':''}${it.diff}</span></td></tr>`).join('')}
+            </tbody>
+          </table>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+async function approveStockCountSubmission(id){
+  if(!confirm('อนุมัติผลต่างจากการนับสต๊อกนี้? สต๊อกจริงจะถูกปรับตามผลนับทันที')) return;
+  try{
+    const sc = data.pendingStockCounts.find(x=>x.id===id);
+    await apiCall('approveStockCount', {id});
+    if(sc){ (sc.items||[]).forEach(it=>{ if(it.diff){ const p = getProduct(it.productId); if(p) p.stock = it.counted; } }); }
+    data.pendingStockCounts = data.pendingStockCounts.filter(x=>x.id!==id);
+    render();
+    showToast('อนุมัติและปรับสต๊อกเรียบร้อย');
+  }catch(e){ showToast(e.message, true); }
+}
+async function rejectStockCountSubmission(id){
+  if(!confirm('ปฏิเสธผลนับสต๊อกนี้? จะไม่มีการปรับสต๊อกใดๆ')) return;
+  try{
+    await apiCall('rejectStockCount', {id});
+    data.pendingStockCounts = data.pendingStockCounts.filter(x=>x.id!==id);
+    render();
+    showToast('ปฏิเสธรายการนี้แล้ว');
+  }catch(e){ showToast(e.message, true); }
 }
 function setStockCountCategory(c){ state.stockCountCategory=c; render(); }
 function setStockCountSearch(v){ state.stockCountSearch=v; render(); }
@@ -993,22 +1079,23 @@ async function submitStockCount(){
   const counts = Object.keys(state.stockCountInputs)
     .filter(pid => state.stockCountInputs[pid] !== '' && state.stockCountInputs[pid] != null)
     .map(pid => ({productId: pid, countedQty: parseInt(state.stockCountInputs[pid]) || 0}));
-  if(counts.length===0){ showToast('กรุณากรอกจำนวนนับอย่างน้อย 1 รายการ', true); return; }
+  if(counts.length < data.products.length){ showToast('กรุณากรอกจำนวนนับให้ครบทุกรายการก่อนยืนยัน', true); return; }
   if(!confirm(`ยืนยันบันทึกผลนับสต๊อก ${counts.length} รายการ?`)) return;
   try{
     const res = await apiCall('submitStockCount', {counts});
-    res.results.forEach(r=>{ const p = getProduct(r.productId); if(p) p.stock = r.counted; });
+    // หมายเหตุ: รายการที่นับได้ไม่ตรงกับระบบ (diff!=0) จะยังไม่ปรับสต๊อกจริง ต้องรอเจ้าของร้านอนุมัติก่อน
     state.stockCountResults = res.results;
     state.stockCountInputs = {};
     render();
-    showToast(res.totalDiffItems>0 ? `พบผลต่าง ${res.totalDiffItems} รายการ` : 'นับสต๊อกตรงกับระบบทุกรายการ');
+    showToast(res.totalDiffItems>0 ? `พบผลต่าง ${res.totalDiffItems} รายการ — รอเจ้าของร้านอนุมัติก่อนจึงจะปรับสต๊อกจริง` : 'นับสต๊อกตรงกับระบบทุกรายการ');
   }catch(e){ showToast(e.message, true); }
 }
 function renderStockCountResults(){
   const results = state.stockCountResults;
+  const hasDiff = results.some(r=>r.diff!==0);
   return `
     <div class="page-title">ผลการนับสต๊อก</div>
-    <div class="page-sub">เปรียบเทียบจำนวนที่นับได้กับยอดในระบบ — บันทึกและอัปเดตสต๊อกเรียบร้อยแล้ว</div>
+    <div class="page-sub">${hasDiff ? 'รายการที่นับได้ไม่ตรงกับระบบจะถูกพักไว้ รอเจ้าของร้านอนุมัติก่อนจึงจะปรับสต๊อกจริง' : 'นับสต๊อกตรงกับระบบทุกรายการ ไม่ต้องรออนุมัติ'}</div>
 
     <div class="card" style="padding:0;">
       <div class="table-wrap">
@@ -1095,6 +1182,7 @@ function viewPO(id){
       </tbody>
     </table>
     </div>
+    ${po.receiptPhotoUrl ? `<div style="margin-top:10px;"><a href="${escapeHtml(po.receiptPhotoUrl)}" target="_blank" rel="noopener" class="link-btn">📄 ดูรูปใบส่งของ</a></div>` : ''}
     ${isOwner?`<div class="cart-total-row grand"><span>ยอดรวม</span><span>${money(po.total)}</span></div>`:''}
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal()">ปิด</button>
@@ -1114,7 +1202,7 @@ async function cancelPO(id){
 }
 function openReceiveModal(id){
   const po = data.purchaseOrders.find(x=>x.id===id);
-  state.receiveDraft = { poId: id, qty: {} };
+  state.receiveDraft = { poId: id, qty: {}, proofBase64:null, proofMime:null, proofPreview:null };
   po.items.forEach(it=>{ state.receiveDraft.qty[it.productId] = it.qty; });
   renderReceiveModal();
 }
@@ -1137,6 +1225,17 @@ function renderReceiveModal(){
       </tbody>
     </table>
     </div>
+    <div class="field" style="margin-top:12px;">
+      <label>แนบรูปใบส่งของ (ไม่บังคับ — ถ่ายรูปหรือเลือกไฟล์)</label>
+      <input type="file" id="poProofInput" accept="image/*" capture="environment" style="display:none;" onchange="handleReceiveProofFileChange(event)">
+      ${d.proofPreview ? `
+        <div style="display:flex;align-items:center;gap:8px;">
+          <img src="${d.proofPreview}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--border);">
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('poProofInput').click()">เปลี่ยนรูป</button>
+          <button class="btn btn-danger btn-sm" onclick="clearReceiveProofFile()">ลบรูป</button>
+        </div>
+      ` : `<button class="btn btn-outline" style="width:100%;" onclick="document.getElementById('poProofInput').click()">📷 แนบรูปใบส่งของ</button>`}
+    </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
       <button class="btn btn-primary" onclick="confirmReceivePO()">ยืนยันรับของ</button>
@@ -1147,16 +1246,39 @@ function setReceiveQty(productId, v){
   const n = parseInt(v);
   state.receiveDraft.qty[productId] = isNaN(n) || n < 0 ? 0 : n;
 }
+async function handleReceiveProofFileChange(ev){
+  const file = ev.target.files && ev.target.files[0];
+  if(!file) return;
+  try{
+    const dataUrl = await resizeImageFile(file, 1000, 0.6);
+    state.receiveDraft.proofPreview = dataUrl;
+    state.receiveDraft.proofMime = 'image/jpeg';
+    state.receiveDraft.proofBase64 = dataUrl.split(',')[1];
+    renderReceiveModal();
+  }catch(e){ showToast(e.message, true); }
+}
+function clearReceiveProofFile(){
+  state.receiveDraft.proofBase64=null; state.receiveDraft.proofMime=null; state.receiveDraft.proofPreview=null;
+  renderReceiveModal();
+}
 async function confirmReceivePO(){
   const d = state.receiveDraft;
   const items = Object.keys(d.qty).map(productId => ({productId, receivedQty: d.qty[productId]}));
+  const proofBase64 = d.proofBase64, proofMime = d.proofMime, poId = d.poId;
   try{
     const saved = await apiCall('receivePO', {id: d.poId, items});
     const idx = data.purchaseOrders.findIndex(p=>p.id===d.poId); if(idx>=0) data.purchaseOrders[idx]=saved;
     saved.items.forEach(it=>{ const p = getProduct(it.productId); if(p && it.receivedQty){ p.stock += it.receivedQty; p.cost = it.cost; } });
     state.receiveDraft = null;
     closeModal(); state.tab='po'; render();
-    showToast(`${d.poId} รับของเรียบร้อย — สต๊อกอัปเดตแล้ว`);
+    showToast(`${poId} รับของเรียบร้อย — สต๊อกอัปเดตแล้ว`);
+    if(proofBase64){
+      try{
+        const res = await apiCall('attachPOProof', {poId, imageBase64: proofBase64, mimeType: proofMime});
+        const p2 = data.purchaseOrders.find(x=>x.id===poId); if(p2) p2.receiptPhotoUrl = res.receiptPhotoUrl;
+        showToast('แนบรูปใบส่งของสำเร็จ');
+      }catch(e){ showToast('แนบรูปใบส่งของไม่สำเร็จ: ' + e.message, true); }
+    }
   }catch(e){ showToast(e.message, true); }
 }
 function openPODraftModal(){
@@ -1389,11 +1511,53 @@ function renderReports(){
   return `
     <div class="page-title">รายงาน</div>
     <div class="page-sub">สรุปข้อมูลจากยอดขาย สต๊อก และต้นทุน</div>
-    <div class="toolbar"><div class="toolbar-left">${nav}</div><div></div></div>
+    <div class="toolbar"><div class="toolbar-left">${nav}</div><button class="btn btn-outline" onclick="exportReportExcel()">ส่งออก Excel</button></div>
     ${body}
   `;
 }
 function setReportView(v){ state.reportView=v; render(); }
+function exportReportExcel(){
+  const wb = XLSX.utils.book_new();
+  if(state.reportView==='movement'){
+    const dayStr = state.reportDate;
+    const daySales = data.sales.filter(s => localDateStr(s.date) === dayStr);
+    const dayPOs = data.purchaseOrders.filter(po => po.receivedDate && localDateStr(po.receivedDate) === dayStr);
+    const dayLogs = data.stockLog.filter(l => localDateStr(l.date) === dayStr);
+    const rows = data.products.map(p=>{
+      const sold = daySales.reduce((sum,s)=>sum + s.items.filter(it=>it.productId===p.id).reduce((a,it)=>a+it.qty,0), 0);
+      const received = dayPOs.reduce((sum,po)=>sum + po.items.filter(it=>it.productId===p.id).reduce((a,it)=>a+(it.receivedQty!==undefined?it.receivedQty:it.qty), 0), 0);
+      const adjust = dayLogs.filter(l=>l.productName===p.name).reduce((a,l)=>a+Number(l.delta),0);
+      const closing = p.stock;
+      const opening = closing - received + sold - adjust;
+      return {'สินค้า':p.name, 'ต้นวัน':opening, 'ขาย':sold, 'รับเข้า':received, 'ปรับ/นับ':adjust, 'ปลายวัน':closing};
+    }).filter(r=>r['ขาย']||r['รับเข้า']||r['ปรับ/นับ']);
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'เคลื่อนไหวสินค้า');
+    XLSX.writeFile(wb, `รายงาน-เคลื่อนไหวสินค้า-${dayStr}.xlsx`);
+  } else if(state.reportView==='value'){
+    const filtered = data.products.filter(p => state.reportValueCategory==='All' || p.category===state.reportValueCategory);
+    const rows = filtered.map(p=>({'สินค้า':p.name, 'หมวดหมู่':catLabel(p.category), 'คงเหลือ':p.stock, 'ต้นทุนต่อหน่วย':p.cost, 'มูลค่ารวม':p.stock*p.cost}))
+      .sort((a,b)=>b['มูลค่ารวม']-a['มูลค่ารวม']);
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'มูลค่าสต๊อก');
+    XLSX.writeFile(wb, `รายงาน-มูลค่าสต๊อก-${new Date().toLocaleDateString('en-CA')}.xlsx`);
+  } else {
+    const dayStr = state.reportDate;
+    const vatPct = Math.round(getVatRate()*100);
+    const daySales = data.sales.filter(s => localDateStr(s.date) === dayStr).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const rows = daySales.map(s=>{
+      const b = saleBreakdown(s);
+      return {
+        'เลขที่':s.id, 'เวลา':fmtDateTime(s.date), 'รายการสินค้า':s.items.map(it=>it.name+' x'+it.qty).join(', '),
+        'สมาชิก': s.memberId ? (getMember(s.memberId)?.name||'') : 'ลูกค้าทั่วไป', 'ผู้ขาย': s.soldBy||'',
+        'รวม VAT':b.grossTotal, 'ex VAT':b.exVat, [`VAT ${vatPct}%`]:b.vat, 'ค่าบริการ (ex VAT)':b.feeExVat, 'กำไรสินค้า':b.profit
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'ยอดขายรายวัน');
+    XLSX.writeFile(wb, `รายงาน-ยอดขาย-${dayStr}.xlsx`);
+  }
+}
 
 function renderReportSales(){
   const dayStr = state.reportDate;
