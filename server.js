@@ -140,7 +140,29 @@ async function bootstrap(emp) {
 // ---------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------
+// เช็คชื่อสินค้า/SKU ซ้ำ (ไม่สนตัวพิมพ์เล็ก-ใหญ่ และช่องว่างหน้า-หลัง) — excludeId ใช้ตอนแก้ไขสินค้าเดิมเพื่อไม่ชนกับตัวเอง
+async function checkProductDuplicate(payload, excludeId) {
+  const name = (payload.name || '').trim();
+  const sku = (payload.sku || '').trim();
+  if (name) {
+    const sql = excludeId
+      ? `SELECT id FROM products WHERE lower(trim(name))=lower(trim($1)) AND id<>$2`
+      : `SELECT id FROM products WHERE lower(trim(name))=lower(trim($1))`;
+    const params = excludeId ? [name, excludeId] : [name];
+    const r = await query(sql, params);
+    if (r.rows.length) throw apiError('มีชื่อสินค้านี้อยู่แล้วในระบบ: ' + name);
+  }
+  if (sku) {
+    const sql = excludeId
+      ? `SELECT id FROM products WHERE lower(trim(sku))=lower(trim($1)) AND id<>$2`
+      : `SELECT id FROM products WHERE lower(trim(sku))=lower(trim($1))`;
+    const params = excludeId ? [sku, excludeId] : [sku];
+    const r = await query(sql, params);
+    if (r.rows.length) throw apiError('มี SKU นี้อยู่แล้วในระบบ: ' + sku);
+  }
+}
 async function addProduct(payload) {
+  await checkProductDuplicate(payload, null);
   const id = uid('p');
   const r = await query(
     `INSERT INTO products (id,name,category,sku,price,cost,stock,low_stock_threshold,unit)
@@ -151,6 +173,9 @@ async function addProduct(payload) {
   return mapProduct(r.rows[0]);
 }
 async function updateProduct(payload) {
+  if (payload.name !== undefined || payload.sku !== undefined) {
+    await checkProductDuplicate(payload, payload.id);
+  }
   const colMap = { name: 'name', category: 'category', sku: 'sku', price: 'price', cost: 'cost', stock: 'stock', lowStockThreshold: 'low_stock_threshold', unit: 'unit' };
   const sets = []; const vals = []; let i = 1;
   Object.keys(colMap).forEach(f => {
@@ -313,6 +338,7 @@ async function receivePO(payload, emp) {
     const po = r.rows[0];
     if (!po) throw apiError('ไม่พบใบสั่งซื้อ');
     if (po.status === 'Received') throw apiError('ใบสั่งซื้อนี้รับของแล้ว');
+    if (po.status === 'Cancelled') throw apiError('ใบสั่งซื้อนี้ถูกยกเลิกไปแล้ว รับของไม่ได้');
     const items = po.items || [];
     const receivedMap = {};
     (payload.items || []).forEach(it => { receivedMap[it.productId] = Number(it.receivedQty); });
@@ -330,6 +356,15 @@ async function receivePO(payload, emp) {
     );
     return mapPO(upd.rows[0]);
   });
+}
+async function cancelPO(payload) {
+  const r = await query('SELECT * FROM purchase_orders WHERE id=$1', [payload.id]);
+  const po = r.rows[0];
+  if (!po) throw apiError('ไม่พบใบสั่งซื้อ');
+  if (po.status === 'Received') throw apiError('ใบสั่งซื้อนี้รับของแล้ว ยกเลิกไม่ได้');
+  if (po.status === 'Cancelled') throw apiError('ใบสั่งซื้อนี้ถูกยกเลิกไปแล้ว');
+  const upd = await query(`UPDATE purchase_orders SET status='Cancelled' WHERE id=$1 RETURNING *`, [payload.id]);
+  return mapPO(upd.rows[0]);
 }
 
 // ---------------------------------------------------------------------
@@ -432,6 +467,7 @@ async function route(action, token, payload) {
       case 'getSaleProof': return { data: await getSaleProof(payload) };
       case 'createPO': return { data: await createPO(payload, emp) };
       case 'receivePO': return { data: await receivePO(payload, emp) };
+      case 'cancelPO': return { data: await cancelPO(payload) };
       case 'submitStockCount': return { data: await submitStockCount(payload, emp) };
       case 'addEmployee': return { data: await addEmployee(payload) };
       case 'updateEmployee': return { data: await updateEmployee(payload) };
